@@ -1,0 +1,6 @@
+[submodule "partition_kes"]
+	path = partition_kes
+	url = https://github.com/mitch680l/partition_kes.git
+[submodule "thingy"]
+	path = thingy
+	url = https://github.com/mitch680l/thingy.git
