@@ -1,11 +1,16 @@
 #!/bin/bash
-
 set -e
 
-echo "🔄 Updating submodules..."
+echo "🔄 Cleaning and updating submodules..."
 
-# Make sure submodules are initialized and updated to latest remote commit
+# Clean submodules first
+git submodule foreach --recursive '
+  echo "🧹 Resetting $name..."
+  git reset --hard
+  git clean -fdx
+'
+
+# Now update to latest remote commits
 git submodule update --init --recursive --remote
 
-echo "✅ Submodules updated."
-sleep 1
+echo "✅ Submodules reset and updated."
