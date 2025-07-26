@@ -1,3 +1,4 @@
+```
 *Requirements  
 -Nordic SDK (incuding nrfutil)  
 -Git Bash or Linux  
@@ -20,3 +21,4 @@ update.sh                              --Will clean and recursivly update the su
 
 *Workflow  
 python script.py (device number) will run everything you need. You may want to make another python script that runs this one (generates device numbers)  
+```
