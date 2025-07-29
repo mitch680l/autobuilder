@@ -21,5 +21,6 @@ verify (blob path) (aes key path)      --Will check encrypted blob with parser &
 
 *Workflow  
 Use combined.py to generate merged.hex (partition application)
-Automatic kestrel application isn't supported currently
+J-Flash merged.hex
+Then upload dfu_application.zip through dfu methods (nrfutil or nrfconnect programmer)
 ```
