@@ -101,8 +101,11 @@ def generate_keys(name, output_dir):
     os.makedirs(output_dir, exist_ok=True)
 
     ecdsa_key = ECC.generate(curve='P-256')
-    with open(os.path.join(output_dir, f"{name}_boot.pem"), "wt") as f:
+    with open(os.path.join(output_dir, f"{name}_boot_private.pem"), "wt") as f:
         f.write(ecdsa_key.export_key(format="PEM"))
+    
+    with open(os.path.join(output_dir, f"{name}_boot.pem"), "wt") as f:
+        f.write(ecdsa_key.public_key().export_key(format="PEM"))
 
     aes_key = get_random_bytes(32)
     with open(os.path.join(output_dir, f"{name}_cipher.pem"), "wb") as f:
