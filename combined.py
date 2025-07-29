@@ -18,10 +18,9 @@ sdk_version = "v3.0.2"
 script_dir = os.path.dirname(os.path.realpath(__file__))
 source_dir_1 = os.path.join(script_dir, "partition_kes")
 
-# Hex blob configuration
-BLOB_ADDRESS = 0xfb400  # Flash address to write the encrypted config blob
-MAX_BLOB_SIZE =  19456    # Maximum size of the flash blob area
-MAGIC_HEADER = b'\xAB\xCD\xEF\x12'  # 4-byte magic number for identification
+BLOB_ADDRESS = 0xfb400  
+MAX_BLOB_SIZE =  4000   
+MAGIC_HEADER = b'\xAB\xCD\xEF\x12'  
 
 
 def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="dfu_application.zip"):
@@ -33,29 +32,28 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
         binary_filename (str): Name of the signed .bin file (default: zephyr_signed.bin)
         dfu_name (str): Name of the final output zip file
     """
-    # Paths
+
     bin_path = os.path.join(device_dir, binary_filename)
     temp_dfu_dir = os.path.join(device_dir, "dfu_tmp")
     manifest_path = os.path.join(temp_dfu_dir, "manifest.json")
     dfu_zip_path = os.path.join(device_dir, dfu_name)
 
-    # Ensure signed bin exists
     if not os.path.isfile(bin_path):
         raise FileNotFoundError(f"❌ Signed binary not found: {bin_path}")
 
-    # Create temp DFU directory
+
     os.makedirs(temp_dfu_dir, exist_ok=True)
 
-    # Copy binary to DFU folder
+
     bin_copy_path = os.path.join(temp_dfu_dir, binary_filename)
     shutil.copy(bin_path, bin_copy_path)
 
-    # Gather metadata
+
     modtime = int(os.path.getmtime(bin_copy_path))
     size = os.path.getsize(bin_copy_path)
     now = int(time.time())
 
-    # Build manifest
+
     manifest = {
         "format-version": 1,
         "time": now,
@@ -64,7 +62,7 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
                 "type": "application",
                 "board": "kestrel",
                 "soc": "nrf9151",
-                "load_address": 0x48000,  # Adjust if needed
+                "load_address": 0x48000, 
                 "image_index": "0",
                 "slot_index_primary": "1",
                 "slot_index_secondary": "2",
@@ -77,20 +75,18 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
         "name": "partition_kes"
     }
 
-    # Write manifest
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=4)
 
     print(f"📝 Created DFU manifest at {manifest_path}")
 
-    # Zip it
     with ZipFile(dfu_zip_path, 'w') as zf:
         zf.write(manifest_path, arcname="manifest.json")
         zf.write(bin_copy_path, arcname=binary_filename)
 
     print(f"✅ Created DFU package: {dfu_zip_path}")
 
-    # Cleanup temp directory
+
     shutil.rmtree(temp_dfu_dir)
     print(f"🧹 Cleaned up temporary folder: {temp_dfu_dir}")
 
@@ -150,8 +146,8 @@ def sign_application_image(customer, device_name, script_dir):
     """
     Signs zephyr.bin using imgtool and places zephyr_signed.bin in the device's output folder.
     """
-    sdk_version = "v3.0.2"  # Ensure this matches your system
-    zephyr_bin_path = os.path.join(script_dir, "zephyr.bin")
+    sdk_version = "v3.0.2"
+    zephyr_bin_path = os.path.join(script_dir, "tfm_merged.hex")
     
     if not os.path.isfile(zephyr_bin_path):
         raise FileNotFoundError(f"Missing application binary: {zephyr_bin_path}")
@@ -172,8 +168,8 @@ def sign_application_image(customer, device_name, script_dir):
     f'-k \"{priv_key_path}\" '
     f'--header-size 0x200 '
     f'--align 4 '
-    f'--version 1.0.0 '
-    f'-S 0xCFE00 '
+    f'--version 0.0.0 '
+    f'-S 0x40000 '
     f'--pad-header '
     f'\"{zephyr_bin_path}\" '
     f'\"{signed_bin_path}\""'
@@ -205,55 +201,50 @@ def create_encrypted_config_blob(aes_key, config_path, device_id):
     with open(config_path, "r") as f:
         lines = [line.strip() for line in f if line.strip()]
 
-    # Prepend device ID
+ 
     device_line = f"{device_id}"
     lines.insert(0, device_line)
 
     blob_data = bytearray()
-    entry_offsets = []  # For logging/debugging
+    entry_offsets = []  
     entry_structs = []
 
-    # Add magic header (4 bytes)
+ 
     blob_data.extend(MAGIC_HEADER)
 
-    # Placeholder for entry count (2 bytes)
-    blob_data.extend(b'\x00\x00')  # Will be overwritten after loop
+  
+    blob_data.extend(b'\x00\x00')  
 
     for line in lines:
         entry_offset = len(blob_data)
         entry_offsets.append(entry_offset)
 
-        iv = get_random_bytes(12)  # 12-byte IV
+        iv = get_random_bytes(12)  
         cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
         cipher.update(AAD)
         ciphertext, tag = cipher.encrypt_and_digest(line.encode())
         full_ciphertext = ciphertext + tag
 
         entry_struct = (
-            struct.pack('<B', len(iv)) +     # IV length
-            iv +                              # IV
-            struct.pack('<H', len(AAD)) +     # AAD length
-            AAD +                             # AAD
-            struct.pack('<H', len(full_ciphertext)) +  # Cipher+tag length
-            full_ciphertext                   # Ciphertext + tag
+            struct.pack('<B', len(iv)) +    
+            iv +                           
+            struct.pack('<H', len(AAD)) +     
+            AAD +                          
+            struct.pack('<H', len(full_ciphertext)) + 
+            full_ciphertext               
         )
         entry_structs.append(entry_struct)
 
-    # Now finalize blob by appending all structured entries
     for entry in entry_structs:
         blob_data.extend(entry)
 
-    # Now patch the real entry count
     struct.pack_into('<H', blob_data, 4, len(entry_structs))
 
-    # Ensure blob fits
     if len(blob_data) > MAX_BLOB_SIZE:
         raise ValueError(f"Encrypted config blob ({len(blob_data)} bytes) exceeds maximum size ({MAX_BLOB_SIZE} bytes)")
 
-    # Pad with zeros
     blob_data.extend(b'\x00' * (MAX_BLOB_SIZE - len(blob_data)))
 
-    # Optional debug log
     print(f"🧩 Encrypted entries: {len(lines)}")
     for i, offset in enumerate(entry_offsets):
         print(f"   ➕ Entry {i} offset: {offset}")
@@ -349,11 +340,11 @@ def clean_build_dirs(script_dir):
     if os.path.isdir(build_path):
         try:
             shutil.rmtree(build_path)
-            print(f"🧹 Deleted build directory: {build_path}")
+            print(f"Deleted build directory: {build_path}")
         except Exception as e:
             print(f"❌ Failed to delete {build_path}: {e}")
     else:
-        print(f"ℹ️ Build directory does not exist: {build_path}")
+        print(f"Build directory does not exist: {build_path}")
 
 def copy_partition_hex(script_dir, output_dir):
     """Copy the built partition hex file to the device output directory"""
@@ -382,57 +373,53 @@ def main(number_str):
     output_dir = os.path.join(customer_dir, device_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Copy config file to device directory
     shutil.copy(config_path, os.path.join(output_dir, CONFIG_FILE))
 
-    # Generate cryptographic keys
-    print(f"🔑 Generating keys for {device_name}...")
+
+    print(f"Generating keys for {device_name}...")
     aes_key = generate_keys(device_name, output_dir)
 
-    # Export keys to partition_kes project
+
     aes_key_path = os.path.join(output_dir, f"{device_name}_cipher.pem")
     export_keys_to_project(aes_key_path, script_dir, cert_info)
 
-    # Configure secure boot
+
     boot_pem = os.path.join(output_dir, f"{device_name}_boot.pem")
     write_sysbuild_conf(script_dir, boot_pem)
 
-    # Clean and build partition_kes
-    print("🧹 Cleaning build directories...")
+
+    print("Cleaning build directories...")
     clean_build_dirs(script_dir)
     
-    print("🔨 Building partition_kes...")
+    print("Building partition_kes...")
     if not build_partition_kes(source_dir_1):
-        print("❌ Build failed. Exiting.")
+        print("Build failed. Exiting.")
         sys.exit(1)
 
-    # Copy partition hex to device directory
+
     partition_hex_path = copy_partition_hex(script_dir, output_dir)
 
-    # Create encrypted config blob
-    print("🔐 Creating encrypted config blob...")
+    print("Creating encrypted config blob...")
     blob_data = create_encrypted_config_blob(aes_key, config_path, device_name)
-    
-    # Create blob hex file
+
     blob_hex_path = os.path.join(output_dir, "blob.hex")
     create_blob_hex_file(blob_data, blob_hex_path)
 
-    # Merge partition firmware with config blob
     merged_hex_path = os.path.join(output_dir, "merged.hex")
     merge_hex_files(partition_hex_path, blob_hex_path, merged_hex_path)
 
-    print("✍️ Signing application binary...")
+    print(" Signing application binary...")
     sign_application_image(customer, device_name, script_dir)
 
     dfu_application(output_dir)
 
     print(f"✅ {device_name} generated successfully!")
-    print(f"📁 Output directory: {output_dir}")
-    print(f"📄 Files created:")
+    print(f"✅Output directory: {output_dir}")
+    print(f"✅Files created:")
     print(f"   - partition.hex (base firmware)")
     print(f"   - blob.hex (encrypted config)")
     print(f"   - merged.hex (final firmware with config)")
-    print(f"🔧 Config blob info:")
+    print(f" Config blob info:")
     print(f"   - Address: 0x{BLOB_ADDRESS:08X}")
     print(f"   - Size: {len(blob_data)} bytes")
     print(f"   - Magic: {MAGIC_HEADER.hex()}")

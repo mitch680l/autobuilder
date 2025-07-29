@@ -73,22 +73,20 @@ def build_with_correct_flow(source_dir):
 def run_parallel_builds(source_dirs):
     """Run builds in parallel using multiprocessing"""
     with multiprocessing.Pool(processes=len(source_dirs)) as pool:
-        print(f"🚀 Starting parallel builds for {len(source_dirs)} projects...")
+        print(f" Starting parallel builds for {len(source_dirs)} projects...")
         results = pool.map(build_with_correct_flow, source_dirs)
     
-    # Check results
     for i, (source_dir, success) in enumerate(zip(source_dirs, results)):
         if success:
             print(f"✅ Build {i+1} completed successfully: {os.path.basename(source_dir)}")
         else:
             print(f"❌ Build {i+1} failed: {os.path.basename(source_dir)}")
     
-    # Return True only if all builds succeeded
     all_successful = all(results)
     if all_successful:
-        print("🎉 All parallel builds completed successfully!")
+        print(" All parallel builds completed successfully!")
     else:
-        print("⚠️ Some builds failed. Check the output above for details.")
+        print(" Some builds failed. Check the output above for details.")
     
     return all_successful
 
@@ -260,7 +258,7 @@ def clean_build_dirs(script_dir):
             except Exception as e:
                 print(f"❌ Failed to delete {path}: {e}")
         else:
-            print(f"ℹ️ Build directory does not exist: {path}")
+            print(f"ℹBuild directory does not exist: {path}")
 
 def main(number_str):
     config_path = os.path.join(script_dir, CONFIG_FILE)
@@ -293,10 +291,10 @@ def main(number_str):
     thingy_dir = os.path.join(script_dir, "thingy", "src")
     os.makedirs(thingy_dir, exist_ok=True)
     shutil.copy(output_c_file, os.path.join(thingy_dir, "encrypted_config.c"))
-    print(f"📦 Copied encrypted_config.c to: thingy/src/")
+    print(f" Copied encrypted_config.c to: thingy/src/")
 
     print(f"✅ {device_name} generated in '{customer}/'")
-    print(f"📁 Folder: {output_dir}")
+    print(f" Folder: {output_dir}")
 
     aes_key_path = os.path.join(output_dir, f"{device_name}_cipher.pem")
     export_keys_to_project(aes_key_path, script_dir, cert_info)
@@ -322,7 +320,6 @@ def main(number_str):
     copy_merged_hex(script_dir, output_dir)
 
 if __name__ == "__main__":
-    # Required for multiprocessing on Windows
     multiprocessing.freeze_support()
     
     if len(sys.argv) != 2:

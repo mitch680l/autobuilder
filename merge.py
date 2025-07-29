@@ -24,12 +24,12 @@ sample_sentences = [
     "Patch this with encrypted keys later."
 ]
 
-# Shuffle to simulate device-unique blob
+
 random.shuffle(sample_sentences)
 
-# === Construct the blob content ===
+
 blob_bytes = bytearray()
-blob_bytes += magic_header  # Add magic number at the beginning
+blob_bytes += magic_header 
 
 for sentence in sample_sentences:
     encoded = sentence.encode('utf-8') + b'\n'
@@ -37,7 +37,7 @@ for sentence in sample_sentences:
         break
     blob_bytes += encoded
 
-# Pad the blob to the full size
+
 blob_bytes += b'\x00' * (max_blob_size - len(blob_bytes))
 
 # === Create Intel HEX for blob ===

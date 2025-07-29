@@ -43,7 +43,7 @@ def parse_blob(blob_data, key=None):
             print(f"⚠️  Reached end of blob before entry {i}")
             break
 
-        print(f"\n➡️  Entry {i} at offset {offset}")
+        print(f"\n  Entry {i} at offset {offset}")
 
         # IV
         iv_len = blob_data[offset]
@@ -86,13 +86,13 @@ def parse_blob(blob_data, key=None):
         if key:
             result = try_decrypt_entry(key, iv, aad, ct)
             if isinstance(result, bytes):
-                print(f"    🔓 Decrypted: {result.decode(errors='replace')}")
+                print(f"     Decrypted: {result.decode(errors='replace')}")
             else:
                 print(f"    {result}")
 
-    print(f"\n📍 Finished parsing {entry_count} entries. Final offset: {offset}/{len(blob_data)}")
+    print(f"\n Finished parsing {entry_count} entries. Final offset: {offset}/{len(blob_data)}")
     if offset != len(blob_data):
-        print(f"⚠️  Warning: {len(blob_data) - offset} bytes of trailing data unparsed.")
+        print(f"  Warning: {len(blob_data) - offset} bytes of trailing data unparsed.")
 
 def main():
     if len(sys.argv) not in [2, 3]:
