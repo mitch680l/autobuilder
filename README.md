@@ -14,11 +14,12 @@
 -Line 7+: will get added to file but unused by app  
 
 *Usage 
-python script.py (device number)       -- Generates device firmware and files will be located in autobuilder/(customer)/nrid(device_number)  
-python merge.py                        -- Will merge blob.hex with merged.hex to make final.hex (This is testing for upcoming update)  
+python combined.py (device number)       -- Generates device firmware and files will be located in autobuilder/(customer)/nrid(device_number)  
 launch_env.sh                          --Launches git bash w/ necessary python enviroment (may require attunment if installed git bash in non default directory)  
 update.sh                              --Will clean and recursivly update the submodules that this project depends on.  
+verify (blob path) (aes key path)      --Will check encrypted blob with parser & aes key
 
 *Workflow  
-python script.py (device number) will run everything you need. You may want to make another python script that runs this one (generates device numbers)  
+Use combined.py to generate merged.hex (partition application)
+Automatic kestrel application isn't supported currently
 ```
