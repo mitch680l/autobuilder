@@ -5,6 +5,7 @@ import subprocess
 import struct
 import json
 import time
+import zlib
 from zipfile import ZipFile
 from Crypto.PublicKey import ECC
 from Crypto.Cipher import AES
@@ -18,10 +19,27 @@ sdk_version = "v3.0.2"
 script_dir = os.path.dirname(os.path.realpath(__file__))
 source_dir_1 = os.path.join(script_dir, "partition_kes")
 
-BLOB_ADDRESS = 0xfb400  
-MAX_BLOB_SIZE =  4000   
+BLOB_ADDRESS = 0xfb000
+BLOB_ADDRESS1 = 0x000fe000  
+MAX_BLOB_SIZE =  8192   
 MAGIC_HEADER = b'\xAB\xCD\xEF\x12'  
+ENTRY_SIZE = 128
 
+def create_dual_blob_hex_files(blob_data, output_path_slot0, output_path_slot1, combined_output_path):
+    """Create two Intel HEX files for Slot 0 and Slot 1 and a combined version"""
+    ih_slot0 = IntelHex()
+    ih_slot0.frombytes(blob_data, offset=BLOB_ADDRESS)
+    ih_slot0.write_hex_file(output_path_slot0)
+    print(f"✅ Created Slot 0 blob.hex")
+
+    ih_slot1 = IntelHex()
+    ih_slot1.frombytes(blob_data, offset=BLOB_ADDRESS1)
+    ih_slot1.write_hex_file(output_path_slot1)
+    print(f"✅ Created Slot 1 blob_backup.hex ")
+
+    ih_slot0.merge(ih_slot1, overlap='replace')
+    ih_slot0.write_hex_file(combined_output_path)
+    print(f"✅ Created combined blob hex with both slots: {combined_output_path}")
 
 def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="dfu_application.zip"):
     """
@@ -96,14 +114,21 @@ def parse_config_and_get_cert_paths(script_dir, config_filename="config_settings
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Config file not found at: {config_path}")
 
+    config_map = {}
+
     with open(config_path, "r") as f:
-        lines = [line.strip() for line in f if line.strip()]
+        for line in f:
+            line = line.strip()
+            if not line or ',' not in line:
+                continue
+            key, value = map(str.strip, line.split(",", 1))
+            config_map[key] = value
 
-    if len(lines) < 2:
-        raise ValueError("Config file must contain at least two non-empty lines (customer and security tag).")
+    if "name" not in config_map or "sec_tag" not in config_map:
+        raise ValueError("Config must contain both 'customer' and 'sec_tag' entries.")
 
-    customer = lines[0]
-    sec_tag = lines[1]
+    customer = config_map["name"]
+    sec_tag = config_map["sec_tag"]
 
     server_auth_dir = os.path.join(script_dir, "server_auth", sec_tag)
 
@@ -118,6 +143,7 @@ def parse_config_and_get_cert_paths(script_dir, config_filename="config_settings
         "pub": pub_path,
         "priv": priv_path
     }
+
 
 def build_partition_kes(source_dir):
     build_dir = os.path.join(source_dir, "build")
@@ -169,7 +195,7 @@ def sign_application_image(customer, device_name, script_dir):
     f'--header-size 0x200 '
     f'--align 4 '
     f'--version 0.0.0 '
-    f'-S 0x40000 '
+    f'-S 0xCFC00 '
     f'--pad-header '
     f'\"{zephyr_bin_path}\" '
     f'\"{signed_bin_path}\""'
@@ -193,63 +219,112 @@ def generate_keys(name, output_dir):
 
     return aes_key
 
+def verify_crc(blob: bytes):
+    data = blob[:MAX_BLOB_SIZE - 4]
+    stored = struct.unpack('<I', blob[MAX_BLOB_SIZE - 4:])[0]
+    computed = compute_crc32(data)
+    print(f"[Check] Stored CRC:   0x{stored:08X}")
+    print(f"[Check] Computed CRC: 0x{computed:08X}")
+    print("✅ Match!" if stored == computed else "❌ CRC mismatch")
+
+
+
+
+
+
+def compute_crc32(data: bytes) -> int:
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0xEDB88320
+            else:
+                crc >>= 1
+    return crc ^ 0xFFFFFFFF
+
 def create_encrypted_config_blob(aes_key, config_path, device_id):
-    """Create a structured blob containing encrypted config data"""
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"'{CONFIG_FILE}' not found")
 
     with open(config_path, "r") as f:
-        lines = [line.strip() for line in f if line.strip()]
+        raw_lines = [line.strip() for line in f if line.strip()]
 
- 
-    device_line = f"{device_id}"
-    lines.insert(0, device_line)
+    lines = []
+    for idx, line in enumerate(raw_lines):
+        parts = line.split(",", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Line {idx+1} must contain a comma separating key and value: '{line}'")
+        key, value = parts
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            raise ValueError(f"Line {idx+1} has empty key or value.")
+        lines.append((key, value))
 
     blob_data = bytearray()
-    entry_offsets = []  
+    #blob_data.extend(MAGIC_HEADER)
+    #blob_data.extend(b'\x00\x00')  # Placeholder for entry count
+
     entry_structs = []
 
- 
-    blob_data.extend(MAGIC_HEADER)
-
-  
-    blob_data.extend(b'\x00\x00')  
-
-    for line in lines:
-        entry_offset = len(blob_data)
-        entry_offsets.append(entry_offset)
-
-        iv = get_random_bytes(12)  
+    for idx, (key, value) in enumerate(lines):
+        aad = key.encode()
+        plaintext = value.encode()
+        iv = get_random_bytes(12)
         cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
-        cipher.update(AAD)
-        ciphertext, tag = cipher.encrypt_and_digest(line.encode())
+        cipher.update(aad)
+        ciphertext, tag = cipher.encrypt_and_digest(plaintext)
         full_ciphertext = ciphertext + tag
 
-        entry_struct = (
-            struct.pack('<B', len(iv)) +    
-            iv +                           
-            struct.pack('<H', len(AAD)) +     
-            AAD +                          
-            struct.pack('<H', len(full_ciphertext)) + 
-            full_ciphertext               
+        entry = (
+            struct.pack('<B', len(iv)) +               # 1 byte IV length
+            iv +                                       # IV (12 bytes)
+            struct.pack('<H', len(aad)) +              # 2 bytes AAD length
+            aad +                                      # AAD
+            struct.pack('<H', len(full_ciphertext)) +  # 2 bytes ciphertext length
+            full_ciphertext                            # ciphertext + tag
         )
-        entry_structs.append(entry_struct)
+
+        if len(entry) > ENTRY_SIZE:
+            raise ValueError(f"Entry {idx} exceeds {ENTRY_SIZE} bytes ({len(entry)}). AAD='{key}', plaintext='{value}'")
+
+        padded_entry = entry.ljust(ENTRY_SIZE, b'\x00')
+        entry_structs.append(padded_entry)
 
     for entry in entry_structs:
         blob_data.extend(entry)
 
+    # Patch entry count at offset 4
     struct.pack_into('<H', blob_data, 4, len(entry_structs))
 
-    if len(blob_data) > MAX_BLOB_SIZE:
-        raise ValueError(f"Encrypted config blob ({len(blob_data)} bytes) exceeds maximum size ({MAX_BLOB_SIZE} bytes)")
+    # === Step 1: Pad to MAX_BLOB_SIZE - 4 ===
+    pad_len = MAX_BLOB_SIZE - 4 - len(blob_data)
+    if pad_len < 0:
+        raise ValueError(f"Encrypted blob exceeds {MAX_BLOB_SIZE - 4} bytes before CRC")
+    blob_data.extend(b'\xFF' * pad_len)
 
-    blob_data.extend(b'\x00' * (MAX_BLOB_SIZE - len(blob_data)))
+    # === Step 2: Compute CRC over first MAX_BLOB_SIZE - 4 bytes ===
+    crc = compute_crc32(blob_data[:MAX_BLOB_SIZE - 4])
 
-    print(f"🧩 Encrypted entries: {len(lines)}")
-    for i, offset in enumerate(entry_offsets):
-        print(f"   ➕ Entry {i} offset: {offset}")
+    # === Step 3: Append CRC at offset MAX_BLOB_SIZE - 4 ===
+    blob_data.extend(struct.pack('<I', crc))  # CRC in little endian
 
+    assert len(blob_data) == MAX_BLOB_SIZE, "Final blob is not the expected size"
+
+    # Summary
+    print(f"🧩 Encrypted entries: {len(entry_structs)}")
+    for i in range(len(entry_structs)):
+        offset = 6 + i * ENTRY_SIZE
+        print(f"   ➕ Entry {i} offset: {offset} (0x{offset:04X})")
+    print(f"   🔒 CRC32 computed: 0x{crc:08X} at offset 0x{MAX_BLOB_SIZE - 4:04X}")
+    print(f"   📦 Final blob size: {len(blob_data)} bytes")
+
+    verify_crc(blob_data)
     return bytes(blob_data)
+
+
+
 
 
 def create_blob_hex_file(blob_data, output_path):
@@ -402,11 +477,14 @@ def main(number_str):
     print("Creating encrypted config blob...")
     blob_data = create_encrypted_config_blob(aes_key, config_path, device_name)
 
-    blob_hex_path = os.path.join(output_dir, "blob.hex")
-    create_blob_hex_file(blob_data, blob_hex_path)
+    blob_hex_slot0 = os.path.join(output_dir, "blob_slot0.hex")
+    blob_hex_slot1 = os.path.join(output_dir, "blob_slot1.hex")
+    combined_blob_hex = os.path.join(output_dir, "blob_combined.hex")
+
+    create_dual_blob_hex_files(blob_data, blob_hex_slot0, blob_hex_slot1, combined_blob_hex)
 
     merged_hex_path = os.path.join(output_dir, "merged.hex")
-    merge_hex_files(partition_hex_path, blob_hex_path, merged_hex_path)
+    merge_hex_files(partition_hex_path, combined_blob_hex, merged_hex_path)
 
     print(" Signing application binary...")
     sign_application_image(customer, device_name, script_dir)

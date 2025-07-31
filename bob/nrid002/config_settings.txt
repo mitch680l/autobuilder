@@ -1,6 +1,9 @@
-bob
-42
-18.234.99.151
-18.234.99.151
-admin
-Kalscott123
+name,bob
+sec_tag,42
+mqtt_host,18.234.99.151
+http_host,18.234.99.151
+user,admin
+pass,Kalscott123
+gps_rate,25
+mqtt_interval,40
+fota_file,blink_2.signed.bin
