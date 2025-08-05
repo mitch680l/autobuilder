@@ -358,8 +358,10 @@ def merge_hex_files(partition_hex_path, blob_hex_path, output_path):
 
 def write_key_to_c_array(key_bytes, var_name, c_path):
     array = ', '.join(f'0x{b:02x}' for b in key_bytes)
-    content = "#include <stdint.h>\n\n"
-    content += f"const uint8_t {var_name}[{len(key_bytes)}] = {{ {array} }};\n"
+    length = len(key_bytes)
+    content = "#include <stdint.h>\n#include <stddef.h>\n\n"
+    content += f"const uint8_t {var_name}[{length}] = {{ {array} }};\n"
+    content += f"const size_t {var_name}_len = {length};\n"
     with open(c_path, "w") as f:
         f.write(content)
 
@@ -367,8 +369,10 @@ def convert_pem_to_c_array(file_path, var_name, output_path):
     with open(file_path, "rb") as f:
         data = f.read()
     array = ', '.join(f'0x{b:02x}' for b in data)
-    content = "#include <stdint.h>\n\n"
-    content += f"const uint8_t {var_name}[{len(data)}] = {{ {array} }};\n"
+    length = len(data)
+    content = "#include <stdint.h>\n#include <stddef.h>\n\n"
+    content += f"const uint8_t {var_name}[{length}] = {{ {array} }};\n"
+    content += f"const size_t {var_name}_len = {length};\n"
     with open(output_path, "w") as f:
         f.write(content)
 
