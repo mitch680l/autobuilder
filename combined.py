@@ -11,6 +11,11 @@ from Crypto.PublicKey import ECC
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from intelhex import IntelHex
+import hashlib
+
+PBKDF2_DK_LEN = 32
+PBKDF2_ITERATIONS_DEFAULT = 64000
+PBKDF2_SALT_LEN = 16
 
 AAD = b"hidden_config"
 CONFIG_FILE = "config_settings.txt"
@@ -25,21 +30,23 @@ MAX_BLOB_SIZE =  8192
 MAGIC_HEADER = b'\xAB\xCD\xEF\x12'  
 ENTRY_SIZE = 128
 
+
+
 def create_dual_blob_hex_files(blob_data, output_path_slot0, output_path_slot1, combined_output_path):
     """Create two Intel HEX files for Slot 0 and Slot 1 and a combined version"""
     ih_slot0 = IntelHex()
     ih_slot0.frombytes(blob_data, offset=BLOB_ADDRESS)
     ih_slot0.write_hex_file(output_path_slot0)
-    print(f"✅ Created Slot 0 blob.hex")
+    print(f"Created Slot 0 blob.hex")
 
     ih_slot1 = IntelHex()
     ih_slot1.frombytes(blob_data, offset=BLOB_ADDRESS1)
     ih_slot1.write_hex_file(output_path_slot1)
-    print(f"✅ Created Slot 1 blob_backup.hex ")
+    print(f"Created Slot 1 blob_backup.hex ")
 
     ih_slot0.merge(ih_slot1, overlap='replace')
     ih_slot0.write_hex_file(combined_output_path)
-    print(f"✅ Created combined blob hex with both slots: {combined_output_path}")
+    print(f"Created combined blob hex with both slots: {combined_output_path}")
 
 def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="dfu_application.zip"):
     """
@@ -57,7 +64,7 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
     dfu_zip_path = os.path.join(device_dir, dfu_name)
 
     if not os.path.isfile(bin_path):
-        raise FileNotFoundError(f"❌ Signed binary not found: {bin_path}")
+        raise FileNotFoundError(f"Signed binary not found: {bin_path}")
 
 
     os.makedirs(temp_dfu_dir, exist_ok=True)
@@ -96,17 +103,17 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=4)
 
-    print(f"📝 Created DFU manifest at {manifest_path}")
+    print(f"Created DFU manifest at {manifest_path}")
 
     with ZipFile(dfu_zip_path, 'w') as zf:
         zf.write(manifest_path, arcname="manifest.json")
         zf.write(bin_copy_path, arcname=binary_filename)
 
-    print(f"✅ Created DFU package: {dfu_zip_path}")
+    print(f"Created DFU package: {dfu_zip_path}")
 
 
     shutil.rmtree(temp_dfu_dir)
-    print(f"🧹 Cleaned up temporary folder: {temp_dfu_dir}")
+    print(f"Cleaned up temporary folder: {temp_dfu_dir}")
 
 def parse_config_and_get_cert_paths(script_dir, config_filename="config_settings.txt"):
     config_path = os.path.join(script_dir, config_filename)
@@ -161,10 +168,10 @@ def build_partition_kes(source_dir):
             "cmd.exe", "/d", "/s", "/c",
             f"cd /d {sdk_workspace} && {build_cmd}"
         ], check=True)
-        print(f"✅ Build succeeded for {source_dir}")
+        print(f"Build succeeded for {source_dir}")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"❌ Build failed for {source_dir}")
+        print(f"Build failed for {source_dir}")
         print(e)
         return False
 
@@ -225,10 +232,7 @@ def verify_crc(blob: bytes):
     computed = compute_crc32(data)
     print(f"[Check] Stored CRC:   0x{stored:08X}")
     print(f"[Check] Computed CRC: 0x{computed:08X}")
-    print("✅ Match!" if stored == computed else "❌ CRC mismatch")
-
-
-
+    print("Match!" if stored == computed else "❌ CRC mismatch")
 
 
 
@@ -243,6 +247,15 @@ def compute_crc32(data: bytes) -> int:
                 crc >>= 1
     return crc ^ 0xFFFFFFFF
 
+def _strip_optional_quotes(s: str) -> str:
+    s = s.strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+def derive_pbkdf2(password_bytes: bytes, salt: bytes, iterations: int, dk_len: int) -> bytes:
+    return hashlib.pbkdf2_hmac('sha256', password_bytes, salt, iterations, dk_len)
+
 def create_encrypted_config_blob(aes_key, config_path, device_id):
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"'{CONFIG_FILE}' not found")
@@ -250,78 +263,96 @@ def create_encrypted_config_blob(aes_key, config_path, device_id):
     with open(config_path, "r") as f:
         raw_lines = [line.strip() for line in f if line.strip()]
 
+    # Parse key,value pairs
     lines = []
     for idx, line in enumerate(raw_lines):
         parts = line.split(",", 1)
         if len(parts) != 2:
             raise ValueError(f"Line {idx+1} must contain a comma separating key and value: '{line}'")
-        key, value = parts
-        key = key.strip()
-        value = value.strip()
+        key = parts[0].strip()
+        value = parts[1].strip()
         if not key or not value:
             raise ValueError(f"Line {idx+1} has empty key or value.")
         lines.append((key, value))
 
-    blob_data = bytearray()
-    #blob_data.extend(MAGIC_HEADER)
-    #blob_data.extend(b'\x00\x00')  # Placeholder for entry count
+    # ---- Find password and derive PBKDF2 ----
+    pw_keys = {"pw"}
+    pw_entry_idx = next((i for i, (k, _) in enumerate(lines) if k.lower() in pw_keys), None)
 
+    if pw_entry_idx is not None:
+        # Extract password without quotes for derivation
+        pw_plain = _strip_optional_quotes(lines[pw_entry_idx][1]).encode()
+
+        # Remove password entry from list (don’t store it in blob)
+        del lines[pw_entry_idx]
+
+        # Derive PBKDF2 with fixed iteration count
+        iterations = PBKDF2_ITERATIONS_DEFAULT
+        salt = get_random_bytes(PBKDF2_SALT_LEN)
+        dk = derive_pbkdf2(pw_plain, salt, iterations, PBKDF2_DK_LEN)
+
+        # Add salt/hash entries (as hex strings)
+        lines.append(("pbkdf2.salt", salt.hex()))
+        lines.append(("pbkdf2.hash", dk.hex()))
+
+        print(f"PBKDF2 derived (iter={iterations}, salt={salt.hex()}, hash={dk.hex()})")
+    else:
+        print("No password found in config (keys tried: password, pass, pw). Skipping PBKDF2.")
+
+    # ---- Build encrypted entries ----
+    blob_data = bytearray()
     entry_structs = []
 
     for idx, (key, value) in enumerate(lines):
         aad = key.encode()
         plaintext = value.encode()
         iv = get_random_bytes(12)
+
         cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
         cipher.update(aad)
         ciphertext, tag = cipher.encrypt_and_digest(plaintext)
         full_ciphertext = ciphertext + tag
 
         entry = (
-            struct.pack('<B', len(iv)) +               # 1 byte IV length
-            iv +                                       # IV (12 bytes)
-            struct.pack('<H', len(aad)) +              # 2 bytes AAD length
-            aad +                                      # AAD
-            struct.pack('<H', len(full_ciphertext)) +  # 2 bytes ciphertext length
-            full_ciphertext                            # ciphertext + tag
+            struct.pack('<B', len(iv)) +
+            iv +
+            struct.pack('<H', len(aad)) +
+            aad +
+            struct.pack('<H', len(full_ciphertext)) +
+            full_ciphertext
         )
 
         if len(entry) > ENTRY_SIZE:
-            raise ValueError(f"Entry {idx} exceeds {ENTRY_SIZE} bytes ({len(entry)}). AAD='{key}', plaintext='{value}'")
+            raise ValueError(f"Entry {idx} exceeds {ENTRY_SIZE} bytes ({len(entry)}). "
+                             f"AAD='{key}', value length={len(plaintext)}")
 
-        padded_entry = entry.ljust(ENTRY_SIZE, b'\x00')
-        entry_structs.append(padded_entry)
+        entry_structs.append(entry.ljust(ENTRY_SIZE, b'\x00'))
 
+    # Pack entries (no header)
     for entry in entry_structs:
         blob_data.extend(entry)
 
-    # Patch entry count at offset 4
-    struct.pack_into('<H', blob_data, 4, len(entry_structs))
-
-    # === Step 1: Pad to MAX_BLOB_SIZE - 4 ===
+    # Pad to MAX_BLOB_SIZE - 4, then append CRC
     pad_len = MAX_BLOB_SIZE - 4 - len(blob_data)
     if pad_len < 0:
         raise ValueError(f"Encrypted blob exceeds {MAX_BLOB_SIZE - 4} bytes before CRC")
     blob_data.extend(b'\xFF' * pad_len)
 
-    # === Step 2: Compute CRC over first MAX_BLOB_SIZE - 4 bytes ===
     crc = compute_crc32(blob_data[:MAX_BLOB_SIZE - 4])
+    blob_data.extend(struct.pack('<I', crc))
 
-    # === Step 3: Append CRC at offset MAX_BLOB_SIZE - 4 ===
-    blob_data.extend(struct.pack('<I', crc))  # CRC in little endian
+    assert len(blob_data) == MAX_BLOB_SIZE
 
-    assert len(blob_data) == MAX_BLOB_SIZE, "Final blob is not the expected size"
-
-    # Summary
-    print(f"🧩 Encrypted entries: {len(entry_structs)}")
+    print(f"Encrypted entries: {len(entry_structs)}")
     for i in range(len(entry_structs)):
-        offset = 6 + i * ENTRY_SIZE
-        print(f"   ➕ Entry {i} offset: {offset} (0x{offset:04X})")
-    print(f"   🔒 CRC32 computed: 0x{crc:08X} at offset 0x{MAX_BLOB_SIZE - 4:04X}")
-    print(f"   📦 Final blob size: {len(blob_data)} bytes")
+        off = i * ENTRY_SIZE
+        print(f"   ➕ Entry {i} offset: {off} (0x{off:04X})")
+    print(f"CRC32: 0x{crc:08X}")
+    print(f"Blob size: {len(blob_data)} bytes")
 
     verify_crc(blob_data)
     return bytes(blob_data)
+
 
 
 
@@ -332,7 +363,7 @@ def create_blob_hex_file(blob_data, output_path):
     ih = IntelHex()
     ih.frombytes(blob_data, offset=BLOB_ADDRESS)
     ih.write_hex_file(output_path)
-    print(f"✅ Created blob.hex with {len(blob_data)} bytes at address 0x{BLOB_ADDRESS:08X}")
+    print(f" Created blob.hex with {len(blob_data)} bytes at address 0x{BLOB_ADDRESS:08X}")
 
 def merge_hex_files(partition_hex_path, blob_hex_path, output_path):
     """Merge partition firmware with encrypted config blob"""
@@ -350,10 +381,10 @@ def merge_hex_files(partition_hex_path, blob_hex_path, output_path):
         
         # Write merged result
         ih_partition.write_hex_file(output_path)
-        print(f"✅ Merged firmware and config blob into {output_path}")
+        print(f"Merged firmware and config blob into {output_path}")
         
     except Exception as e:
-        print(f"❌ Failed to merge hex files: {e}")
+        print(f" Failed to merge hex files: {e}")
         raise
 
 def write_key_to_c_array(key_bytes, var_name, c_path):
@@ -421,7 +452,7 @@ def clean_build_dirs(script_dir):
             shutil.rmtree(build_path)
             print(f"Deleted build directory: {build_path}")
         except Exception as e:
-            print(f"❌ Failed to delete {build_path}: {e}")
+            print(f" Failed to delete {build_path}: {e}")
     else:
         print(f"Build directory does not exist: {build_path}")
 
@@ -434,14 +465,14 @@ def copy_partition_hex(script_dir, output_dir):
         raise FileNotFoundError(f"Built partition hex file not found: {source_hex}")
     
     shutil.copy(source_hex, dest_hex)
-    print(f"✅ Copied partition firmware to: {dest_hex}")
+    print(f" Copied partition firmware to: {dest_hex}")
     return dest_hex
 
 def main(number_str):
     config_path = os.path.join(script_dir, CONFIG_FILE)
 
     if not os.path.isfile(config_path):
-        print(f"❌ '{CONFIG_FILE}' not found in script directory.")
+        print(f" '{CONFIG_FILE}' not found in script directory.")
         sys.exit(1)
 
     cert_info = parse_config_and_get_cert_paths(script_dir)
@@ -495,9 +526,9 @@ def main(number_str):
 
     dfu_application(output_dir)
 
-    print(f"✅ {device_name} generated successfully!")
-    print(f"✅Output directory: {output_dir}")
-    print(f"✅Files created:")
+    print(f" {device_name} generated successfully!")
+    print(f"Output directory: {output_dir}")
+    print(f"Files created:")
     print(f"   - partition.hex (base firmware)")
     print(f"   - blob.hex (encrypted config)")
     print(f"   - merged.hex (final firmware with config)")

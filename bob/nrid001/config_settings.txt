@@ -1,9 +1,36 @@
 name,bob
 sec_tag,42
-mqtt_host,18.234.99.151
-http_host,18.234.99.151
+mqtt_broker_host,18.234.99.151
+fota_host,18.234.99.151
 user,admin
 pass,Kalscott123
-gps_rate,25
-mqtt_interval,40
-fota_file,blink_2.signed.bin
+gps_target_rate,25
+interval_mqtt,40
+firmware_filename,blink_2.signed.bin
+pw,Kalscott123
+topic_gps,gnss_json
+topic_sensor,sensor_json
+topic_lte,lte_json
+enable_iridium,false
+test,Please enjoy this exactly sixty-four-character sentence today!!!
+test2,Please enjoy this exactly sixty-four-character sentence today!!!
+test3,Please enjoy this exactly sixty-four-character sentence today!!!
+test4,Please enjoy this exactly sixty-four-character sentence today!!!
+test5,Please enjoy this exactly sixty-four-character sentence today!!!
+test6,Please enjoy this exactly sixty-four-character sentence today!!!
+test7,Please enjoy this exactly sixty-four-character sentence today!!!
+test8,Please enjoy this exactly sixty-four-character sentence today!!!
+test9,Please enjoy this exactly sixty-four-character sentence today!!!
+test10,Please enjoy this exactly sixty-four-character sentence today!!!
+test11,Please enjoy this exactly sixty-four-character sentence today!!!
+test12,Please enjoy this exactly sixty-four-character sentence today!!!
+test13,Please enjoy this exactly sixty-four-character sentence today!!!
+test14,Please enjoy this exactly sixty-four-character sentence today!!!
+test15,Please enjoy this exactly sixty-four-character sentence today!!!
+test16,Please enjoy this exactly sixty-four-character sentence today!!!
+test17,Please enjoy this exactly sixty-four-character sentence today!!!
+test18,Please enjoy this exactly sixty-four-character sentence today!!!
+test19,Please enjoy this exactly sixty-four-character sentence today!!!
+test20,Please enjoy this exactly sixty-four-character sentence today!!!
+
+

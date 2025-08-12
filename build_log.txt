@@ -1,0 +1,21 @@
+
+
+Exit code: 1
+
+================================================================================
+Launch: 2025-08-12T09:40:08.249513
+CMD: nrfutil sdk-manager toolchain launch --ncs-version v3.0.2 -- cmd.exe /d /s /c cd /d "C:\ncs\v3.0.2" && west build --build-dir "\\wsl.localhost\Ubuntu-24.04\thingy\build\thingy" "\\wsl.localhost\Ubuntu-24.04\thingy" --pristine -b "KalScott/nrf9151/ns" -- -DBOARD_ROOT="\\wsl.localhost\Ubuntu-24.04\thingy"
+================================================================================
+The filename, directory name, or volume label syntax is incorrect.
+Error: Launched process exited with non-zero status: 1
+
+Exit code: 1
+
+================================================================================
+Launch: 2025-08-12T09:44:47.055040
+CMD: nrfutil sdk-manager toolchain launch --ncs-version v3.0.2 -- cmd.exe /d /s /c cd /d "C:\ncs\v3.0.2" && west build --build-dir "C:\Users\leona\Desktop\autobuilder\thingy\build\thingy" "C:\Users\leona\Desktop\autobuilder\thingy" --pristine -b "KalScott/nrf9151/ns" -- -DBOARD_ROOT="C:\Users\leona\Desktop\autobuilder\thingy"
+================================================================================
+The filename, directory name, or volume label syntax is incorrect.
+Error: Launched process exited with non-zero status: 1
+
+Exit code: 1
