@@ -12,24 +12,30 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from intelhex import IntelHex
 import hashlib
-
+import platform
+from pathlib import Path
 PBKDF2_DK_LEN = 32
 PBKDF2_ITERATIONS_DEFAULT = 64000
 PBKDF2_SALT_LEN = 16
 
 AAD = b"hidden_config"
 CONFIG_FILE = "config_settings.txt"
-sdk_workspace = r"C:\ncs\v3.0.2"
+
+# --- changed: make sdk_workspace OS-aware ---
 sdk_version = "v3.0.2"
+if platform.system() == "Linux":
+    sdk_workspace = os.path.expanduser("~/ncs/v3.0.2")
+else:
+    sdk_workspace = r"C:\ncs\v3.0.2"
+
 script_dir = os.path.dirname(os.path.realpath(__file__))
 source_dir_1 = os.path.join(script_dir, "partition_kes")
 
 BLOB_ADDRESS = 0xfb000
-BLOB_ADDRESS1 = 0x000fe000  
-MAX_BLOB_SIZE =  8192   
-MAGIC_HEADER = b'\xAB\xCD\xEF\x12'  
+BLOB_ADDRESS1 = 0x000fe000
+MAX_BLOB_SIZE =  8192
+MAGIC_HEADER = b'\xAB\xCD\xEF\x12'
 ENTRY_SIZE = 128
-
 
 
 def create_dual_blob_hex_files(blob_data, output_path_slot0, output_path_slot1, combined_output_path):
@@ -48,16 +54,11 @@ def create_dual_blob_hex_files(blob_data, output_path_slot0, output_path_slot1, 
     ih_slot0.write_hex_file(combined_output_path)
     print(f"Created combined blob hex with both slots: {combined_output_path}")
 
+
 def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="dfu_application.zip"):
     """
     Create a DFU package zip with a manifest.json and the signed binary inside.
-    
-    Args:
-        device_dir (str): Path to device folder (e.g., .../bob/nrid001)
-        binary_filename (str): Name of the signed .bin file (default: zephyr_signed.bin)
-        dfu_name (str): Name of the final output zip file
     """
-
     bin_path = os.path.join(device_dir, binary_filename)
     temp_dfu_dir = os.path.join(device_dir, "dfu_tmp")
     manifest_path = os.path.join(temp_dfu_dir, "manifest.json")
@@ -66,18 +67,14 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
     if not os.path.isfile(bin_path):
         raise FileNotFoundError(f"Signed binary not found: {bin_path}")
 
-
     os.makedirs(temp_dfu_dir, exist_ok=True)
-
 
     bin_copy_path = os.path.join(temp_dfu_dir, binary_filename)
     shutil.copy(bin_path, bin_copy_path)
 
-
     modtime = int(os.path.getmtime(bin_copy_path))
     size = os.path.getsize(bin_copy_path)
     now = int(time.time())
-
 
     manifest = {
         "format-version": 1,
@@ -87,7 +84,7 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
                 "type": "application",
                 "board": "kestrel",
                 "soc": "nrf9151",
-                "load_address": 0x48000, 
+                "load_address": 0x48000,
                 "image_index": "0",
                 "slot_index_primary": "1",
                 "slot_index_secondary": "2",
@@ -111,9 +108,9 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
 
     print(f"Created DFU package: {dfu_zip_path}")
 
-
     shutil.rmtree(temp_dfu_dir)
     print(f"Cleaned up temporary folder: {temp_dfu_dir}")
+
 
 def parse_config_and_get_cert_paths(script_dir, config_filename="config_settings.txt"):
     config_path = os.path.join(script_dir, config_filename)
@@ -161,13 +158,25 @@ def build_partition_kes(source_dir):
     )
 
     try:
-        subprocess.run([
-            "nrfutil", "sdk-manager", "toolchain", "launch",
-            "--ncs-version", sdk_version,
-            "--",
-            "cmd.exe", "/d", "/s", "/c",
-            f"cd /d {sdk_workspace} && {build_cmd}"
-        ], check=True)
+        if platform.system() == "Linux":
+            # Use bash on Linux
+            subprocess.run([
+                "nrfutil", "sdk-manager", "toolchain", "launch",
+                "--ncs-version", sdk_version,
+                "--",
+                "bash", "-lc",
+                f'cd "{sdk_workspace}" && {build_cmd}'
+            ], check=True)
+        else:
+            # Original Windows flow
+            subprocess.run([
+                "nrfutil", "sdk-manager", "toolchain", "launch",
+                "--ncs-version", sdk_version,
+                "--",
+                "cmd.exe", "/d", "/s", "/c",
+                f"cd /d {sdk_workspace} && {build_cmd}"
+            ], check=True)
+
         print(f"Build succeeded for {source_dir}")
         return True
     except subprocess.CalledProcessError as e:
@@ -175,13 +184,14 @@ def build_partition_kes(source_dir):
         print(e)
         return False
 
+
 def sign_application_image(customer, device_name, script_dir):
     """
     Signs zephyr.bin using imgtool and places zephyr_signed.bin in the device's output folder.
     """
     sdk_version = "v3.0.2"
     zephyr_bin_path = os.path.join(script_dir, "tfm_merged.hex")
-    
+
     if not os.path.isfile(zephyr_bin_path):
         raise FileNotFoundError(f"Missing application binary: {zephyr_bin_path}")
 
@@ -192,21 +202,41 @@ def sign_application_image(customer, device_name, script_dir):
     if not os.path.isfile(priv_key_path):
         raise FileNotFoundError(f"Private signing key not found: {priv_key_path}")
 
-    full_cmd = (
-    f'nrfutil sdk-manager toolchain launch '
-    f'--ncs-version {sdk_version} '
-    f'-- '
-    f'cmd.exe /d /s /c '
-    f'"cd /d {script_dir} && imgtool sign '
-    f'-k \"{priv_key_path}\" '
-    f'--header-size 0x200 '
-    f'--align 4 '
-    f'--version 0.0.0 '
-    f'-S 0xCFC00 '
-    f'--pad-header '
-    f'\"{zephyr_bin_path}\" '
-    f'\"{signed_bin_path}\""'
-    )
+    if platform.system() == "Linux":
+        # Linux: run via bash
+        full_cmd = (
+            f'nrfutil sdk-manager toolchain launch '
+            f'--ncs-version {sdk_version} '
+            f'-- '
+            f'bash -lc '
+            f'"cd \\"{script_dir}\\" && imgtool sign '
+            f'-k \\"{priv_key_path}\\" '
+            f'--header-size 0x200 '
+            f'--align 4 '
+            f'--version 0.0.0 '
+            f'-S 0xCFC00 '
+            f'--pad-header '
+            f'\\"{zephyr_bin_path}\\" '
+            f'\\"{signed_bin_path}\\""'  # close bash-quoted string
+        )
+    else:
+        # Windows: original cmd.exe path
+        full_cmd = (
+            f'nrfutil sdk-manager toolchain launch '
+            f'--ncs-version {sdk_version} '
+            f'-- '
+            f'cmd.exe /d /s /c '
+            f'"cd /d {script_dir} && imgtool sign '
+            f'-k \"{priv_key_path}\" '
+            f'--header-size 0x200 '
+            f'--align 4 '
+            f'--version 0.0.0 '
+            f'-S 0xCFC00 '
+            f'--pad-header '
+            f'\"{zephyr_bin_path}\" '
+            f'\"{signed_bin_path}\""'
+        )
+
     subprocess.run(full_cmd, shell=True, check=True)
 
 
@@ -226,14 +256,14 @@ def generate_keys(name, output_dir):
 
     return aes_key
 
+
 def verify_crc(blob: bytes):
     data = blob[:MAX_BLOB_SIZE - 4]
     stored = struct.unpack('<I', blob[MAX_BLOB_SIZE - 4:])[0]
     computed = compute_crc32(data)
     print(f"[Check] Stored CRC:   0x{stored:08X}")
     print(f"[Check] Computed CRC: 0x{computed:08X}")
-    print("Match!" if stored == computed else "❌ CRC mismatch")
-
+    print("Match!" if stored == computed else "CRC mismatch")
 
 
 def compute_crc32(data: bytes) -> int:
@@ -247,14 +277,17 @@ def compute_crc32(data: bytes) -> int:
                 crc >>= 1
     return crc ^ 0xFFFFFFFF
 
+
 def _strip_optional_quotes(s: str) -> str:
     s = s.strip()
     if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
         return s[1:-1]
     return s
 
+
 def derive_pbkdf2(password_bytes: bytes, salt: bytes, iterations: int, dk_len: int) -> bytes:
     return hashlib.pbkdf2_hmac('sha256', password_bytes, salt, iterations, dk_len)
+
 
 def create_encrypted_config_blob(aes_key, config_path, device_id):
     if not os.path.isfile(config_path):
@@ -347,15 +380,11 @@ def create_encrypted_config_blob(aes_key, config_path, device_id):
     for i in range(len(entry_structs)):
         off = i * ENTRY_SIZE
         print(f"   ➕ Entry {i} offset: {off} (0x{off:04X})")
-    print(f"CRC32: 0x{crc:08X}")
+        print(f"CRC32: 0x{crc:08X}")
     print(f"Blob size: {len(blob_data)} bytes")
 
     verify_crc(blob_data)
     return bytes(blob_data)
-
-
-
-
 
 
 def create_blob_hex_file(blob_data, output_path):
@@ -365,27 +394,29 @@ def create_blob_hex_file(blob_data, output_path):
     ih.write_hex_file(output_path)
     print(f" Created blob.hex with {len(blob_data)} bytes at address 0x{BLOB_ADDRESS:08X}")
 
+
 def merge_hex_files(partition_hex_path, blob_hex_path, output_path):
     """Merge partition firmware with encrypted config blob"""
     try:
         # Load partition firmware hex
         ih_partition = IntelHex()
         ih_partition.loadfile(partition_hex_path, format='hex')
-        
+
         # Load blob hex
         ih_blob = IntelHex()
         ih_blob.loadfile(blob_hex_path, format='hex')
-        
+
         # Merge blob into partition firmware
         ih_partition.merge(ih_blob, overlap='replace')
-        
+
         # Write merged result
         ih_partition.write_hex_file(output_path)
         print(f"Merged firmware and config blob into {output_path}")
-        
+
     except Exception as e:
         print(f" Failed to merge hex files: {e}")
         raise
+
 
 def write_key_to_c_array(key_bytes, var_name, c_path):
     array = ', '.join(f'0x{b:02x}' for b in key_bytes)
@@ -395,6 +426,7 @@ def write_key_to_c_array(key_bytes, var_name, c_path):
     content += f"const size_t {var_name}_len = {length};\n"
     with open(c_path, "w") as f:
         f.write(content)
+
 
 def convert_pem_to_c_array(file_path, var_name, output_path):
     with open(file_path, "rb") as f:
@@ -406,6 +438,7 @@ def convert_pem_to_c_array(file_path, var_name, output_path):
     content += f"const size_t {var_name}_len = {length};\n"
     with open(output_path, "w") as f:
         f.write(content)
+
 
 def export_keys_to_project(aes_key_path, script_dir, cert_info):
     aes_out_path = os.path.join(script_dir, "partition_kes", "src", "aes.c")
@@ -422,19 +455,21 @@ def export_keys_to_project(aes_key_path, script_dir, cert_info):
     convert_pem_to_c_array(pub_path, "public_cert", os.path.join(script_dir, "partition_kes", "src", "public.c"))
     convert_pem_to_c_array(priv_path, "private_key", os.path.join(script_dir, "partition_kes", "src", "private.c"))
 
+
 def write_sysbuild_conf(script_dir, boot_pem_path):
     """Writes partition_kes/sysbuild.conf with secure-boot settings"""
     sysbuild_dir = os.path.join(script_dir, "partition_kes")
     os.makedirs(sysbuild_dir, exist_ok=True)
     conf_path = os.path.join(sysbuild_dir, "sysbuild.conf")
 
-    win_path = boot_pem_path.replace(os.sep, "/")
+    # Always use an absolute, POSIX-style path so CMake/west sign see it correctly
+    key_path_for_cmake = Path(boot_pem_path).resolve().as_posix()
 
     lines = [
         "SB_CONFIG_BOOTLOADER_MCUBOOT=y",
-        f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{win_path}"',
+        f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{key_path_for_cmake}"',
         "SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y",
-        f'SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="{win_path}"',
+        f'SB_CONFIG_SECURE_BOOT_SIGNING_KEY_FILE="{key_path_for_cmake}"',
         "SB_CONFIG_SECURE_BOOT_SIGNATURE_TYPE_ECDSA=y",
         ""
     ]
@@ -442,11 +477,13 @@ def write_sysbuild_conf(script_dir, boot_pem_path):
     with open(conf_path, "w") as f:
         f.write("\n".join(lines))
 
-    print(f"🛠 Updated secure-boot config: {conf_path}")
+    print(f"Updated secure-boot config: {conf_path}")
+
+
 
 def clean_build_dirs(script_dir):
     build_path = os.path.join(script_dir, "partition_kes", "build")
-    
+
     if os.path.isdir(build_path):
         try:
             shutil.rmtree(build_path)
@@ -456,17 +493,19 @@ def clean_build_dirs(script_dir):
     else:
         print(f"Build directory does not exist: {build_path}")
 
+
 def copy_partition_hex(script_dir, output_dir):
     """Copy the built partition hex file to the device output directory"""
     source_hex = os.path.join(script_dir, "partition_kes", "build", "merged.hex")
     dest_hex = os.path.join(output_dir, "partition.hex")
-    
+
     if not os.path.isfile(source_hex):
         raise FileNotFoundError(f"Built partition hex file not found: {source_hex}")
-    
+
     shutil.copy(source_hex, dest_hex)
     print(f" Copied partition firmware to: {dest_hex}")
     return dest_hex
+
 
 def main(number_str):
     config_path = os.path.join(script_dir, CONFIG_FILE)
@@ -485,27 +524,22 @@ def main(number_str):
 
     shutil.copy(config_path, os.path.join(output_dir, CONFIG_FILE))
 
-
     print(f"Generating keys for {device_name}...")
     aes_key = generate_keys(device_name, output_dir)
-
 
     aes_key_path = os.path.join(output_dir, f"{device_name}_cipher.pem")
     export_keys_to_project(aes_key_path, script_dir, cert_info)
 
-
     boot_pem = os.path.join(output_dir, f"{device_name}_boot.pem")
     write_sysbuild_conf(script_dir, boot_pem)
 
-
     print("Cleaning build directories...")
     clean_build_dirs(script_dir)
-    
+
     print("Building partition_kes...")
     if not build_partition_kes(source_dir_1):
         print("Build failed. Exiting.")
         sys.exit(1)
-
 
     partition_hex_path = copy_partition_hex(script_dir, output_dir)
 
@@ -536,6 +570,7 @@ def main(number_str):
     print(f"   - Address: 0x{BLOB_ADDRESS:08X}")
     print(f"   - Size: {len(blob_data)} bytes")
     print(f"   - Magic: {MAGIC_HEADER.hex()}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
