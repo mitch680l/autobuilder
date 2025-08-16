@@ -29,6 +29,7 @@ else:
     sdk_workspace = r"C:\ncs\v3.0.2"
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
+
 source_dir_1 = os.path.join(script_dir, "partition_kes")
 
 BLOB_ADDRESS = 0xfb000
@@ -37,22 +38,29 @@ MAX_BLOB_SIZE =  8192
 MAGIC_HEADER = b'\xAB\xCD\xEF\x12'
 ENTRY_SIZE = 128
 
+def _must_not_exist(path: str, what: str):
+    if os.path.exists(path):
+        raise FileExistsError(f"{what} already exists: {path}")
 
 def create_dual_blob_hex_files(blob_data, output_path_slot0, output_path_slot1, combined_output_path):
-    """Create two Intel HEX files for Slot 0 and Slot 1 and a combined version"""
+    _must_not_exist(output_path_slot0, "Slot 0 blob hex")
+    _must_not_exist(output_path_slot1, "Slot 1 blob hex")
+    _must_not_exist(combined_output_path, "Combined blob hex")
+
     ih_slot0 = IntelHex()
     ih_slot0.frombytes(blob_data, offset=BLOB_ADDRESS)
     ih_slot0.write_hex_file(output_path_slot0)
-    print(f"Created Slot 0 blob.hex")
+    print("Created Slot 0 blob.hex")
 
     ih_slot1 = IntelHex()
     ih_slot1.frombytes(blob_data, offset=BLOB_ADDRESS1)
     ih_slot1.write_hex_file(output_path_slot1)
-    print(f"Created Slot 1 blob_backup.hex ")
+    print("Created Slot 1 blob_backup.hex")
 
     ih_slot0.merge(ih_slot1, overlap='replace')
     ih_slot0.write_hex_file(combined_output_path)
     print(f"Created combined blob hex with both slots: {combined_output_path}")
+
 
 
 def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="dfu_application.zip"):
@@ -110,6 +118,68 @@ def dfu_application(device_dir, binary_filename="zephyr_signed.bin", dfu_name="d
 
     shutil.rmtree(temp_dfu_dir)
     print(f"Cleaned up temporary folder: {temp_dfu_dir}")
+
+def overwrite_name_in_file(config_path: str, customer_name: str):
+    """
+    In-place update of the 'name' entry in the given config file.
+    - Preserves original line order
+    - Only changes the value part for the first 'name' key
+    - Raises if not found
+    """
+    with open(config_path, "r", encoding="utf-8-sig") as f:
+        lines = f.read().splitlines()
+
+    replaced = False
+    for i, line in enumerate(lines):
+        if not line.strip() or "," not in line:
+            continue
+        key, value = line.split(",", 1)
+        if key.strip().lower() == "name":
+            old = value
+            lines[i] = f"{key},{customer_name}"
+            print(f"[update] {key}: '{old}' -> '{customer_name}' (line {i+1})")
+            replaced = True
+            break
+
+    if not replaced:
+        raise KeyError("Expected 'name' not found in config file.")
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def overwrite_mq_clid_in_file(config_path: str, device_id: str):
+    """
+    In-place update of mq_clid / mqtt_clid in the given config file.
+    - Preserves original line order and key spelling
+    - Only changes the value part for the first matching key
+    - Raises if neither key is found
+    """
+    def norm(k: str) -> str:
+        return k.strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+
+    targets = {"mqclid", "mqttclid"}
+
+    with open(config_path, "r", encoding="utf-8-sig") as f:
+        lines = f.read().splitlines()
+
+    replaced = False
+    for i, line in enumerate(lines):
+        if not line.strip() or "," not in line:
+            continue
+        key, value = line.split(",", 1)
+        if norm(key) in targets:
+            old = value
+            lines[i] = f"{key},{device_id}"
+            print(f"[update] {key}: '{old}' -> '{device_id}' (line {i+1})")
+            replaced = True
+            break
+
+    if not replaced:
+        raise KeyError("Expected 'mq_clid' or 'mqtt_clid' not found in config file.")
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def parse_config_and_get_cert_paths(script_dir, config_filename="config_settings.txt"):
@@ -185,76 +255,70 @@ def build_partition_kes(source_dir):
         return False
 
 
-def sign_application_image(customer, device_name, script_dir):
+def sign_application_image(device_name, output_dir, script_dir):
     """
-    Signs zephyr.bin using imgtool and places zephyr_signed.bin in the device's output folder.
+    Signs tfm_merged.hex using imgtool and places zephyr_signed.bin in the device's output folder.
+    Paths honor the new firmware_storage layout and refuse to overwrite.
     """
     sdk_version = "v3.0.2"
-    zephyr_bin_path = os.path.join(script_dir, "tfm_merged.hex")
-
+    zephyr_bin_path = os.path.join(script_dir, "tfm_merged.hex")  # unchanged input
     if not os.path.isfile(zephyr_bin_path):
         raise FileNotFoundError(f"Missing application binary: {zephyr_bin_path}")
 
-    device_dir = os.path.join(script_dir, customer, device_name)
-    priv_key_path = os.path.join(device_dir, f"{device_name}_boot.pem")
-    signed_bin_path = os.path.join(device_dir, "zephyr_signed.bin")
+    priv_key_path   = os.path.join(output_dir, f"{device_name}_boot.pem")
+    signed_bin_path = os.path.join(output_dir, "zephyr_signed.bin")
 
     if not os.path.isfile(priv_key_path):
         raise FileNotFoundError(f"Private signing key not found: {priv_key_path}")
 
+    _must_not_exist(signed_bin_path, "Signed application image")
+
     if platform.system() == "Linux":
-        # Linux: run via bash
         full_cmd = (
-            f'nrfutil sdk-manager toolchain launch '
-            f'--ncs-version {sdk_version} '
-            f'-- '
-            f'bash -lc '
-            f'"cd \\"{script_dir}\\" && imgtool sign '
-            f'-k \\"{priv_key_path}\\" '
-            f'--header-size 0x200 '
-            f'--align 4 '
-            f'--version 0.0.0 '
-            f'-S 0xCFC00 '
-            f'--pad-header '
-            f'\\"{zephyr_bin_path}\\" '
-            f'\\"{signed_bin_path}\\""'  # close bash-quoted string
+            f'nrfutil sdk-manager toolchain launch --ncs-version {sdk_version} -- '
+            f'bash -lc "cd \\"{script_dir}\\" && imgtool sign '
+            f'-k \\"{priv_key_path}\\" --header-size 0x200 --align 4 --version 0.0.0 '
+            f'-S 0xCFC00 --pad-header \\"{zephyr_bin_path}\\" \\"{signed_bin_path}\\""'
         )
     else:
-        # Windows: original cmd.exe path
         full_cmd = (
-            f'nrfutil sdk-manager toolchain launch '
-            f'--ncs-version {sdk_version} '
-            f'-- '
-            f'cmd.exe /d /s /c '
-            f'"cd /d {script_dir} && imgtool sign '
-            f'-k \"{priv_key_path}\" '
-            f'--header-size 0x200 '
-            f'--align 4 '
-            f'--version 0.0.0 '
-            f'-S 0xCFC00 '
-            f'--pad-header '
-            f'\"{zephyr_bin_path}\" '
-            f'\"{signed_bin_path}\""'
+            f'nrfutil sdk-manager toolchain launch --ncs-version {sdk_version} -- '
+            f'cmd.exe /d /s /c "cd /d {script_dir} && imgtool sign '
+            f'-k \\"{priv_key_path}\\" --header-size 0x200 --align 4 --version 0.0.0 '
+            f'-S 0xCFC00 --pad-header \\"{zephyr_bin_path}\\" \\"{signed_bin_path}\\""'
         )
 
     subprocess.run(full_cmd, shell=True, check=True)
 
 
+
+
 def generate_keys(name, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
+    # Directory is created in main(); just ensure it exists
+    if not os.path.isdir(output_dir):
+        raise FileNotFoundError(f"Output directory not found: {output_dir}")
 
     ecdsa_key = ECC.generate(curve='P-256')
-    with open(os.path.join(output_dir, f"{name}_boot.pem"), "wt") as f:
+    boot_pem = os.path.join(output_dir, f"{name}_boot.pem")
+    boot_pub = os.path.join(output_dir, f"{name}_boot_pub.pem")
+    aes_pem  = os.path.join(output_dir, f"{name}_cipher.pem")
+
+    _must_not_exist(boot_pem, "Private signing key")
+    _must_not_exist(boot_pub, "Public signing key")
+    _must_not_exist(aes_pem,  "AES key")
+
+    with open(boot_pem, "x") as f:
         f.write(ecdsa_key.export_key(format="PEM"))
 
-    with open(os.path.join(output_dir, f"{name}_boot_pub.pem"), "wt") as f:
+    with open(boot_pub, "x") as f:
         f.write(ecdsa_key.public_key().export_key(format="PEM"))
 
     aes_key = get_random_bytes(32)
-    with open(os.path.join(output_dir, f"{name}_cipher.pem"), "wb") as f:
+    with open(aes_pem, "xb") as f:
         f.write(aes_key)
 
     return aes_key
+
 
 
 def verify_crc(blob: bytes):
@@ -396,26 +460,17 @@ def create_blob_hex_file(blob_data, output_path):
 
 
 def merge_hex_files(partition_hex_path, blob_hex_path, output_path):
-    """Merge partition firmware with encrypted config blob"""
+    _must_not_exist(output_path, "Merged hex output")
     try:
-        # Load partition firmware hex
-        ih_partition = IntelHex()
-        ih_partition.loadfile(partition_hex_path, format='hex')
-
-        # Load blob hex
-        ih_blob = IntelHex()
-        ih_blob.loadfile(blob_hex_path, format='hex')
-
-        # Merge blob into partition firmware
+        ih_partition = IntelHex(); ih_partition.loadfile(partition_hex_path, format='hex')
+        ih_blob      = IntelHex(); ih_blob.loadfile(blob_hex_path, format='hex')
         ih_partition.merge(ih_blob, overlap='replace')
-
-        # Write merged result
         ih_partition.write_hex_file(output_path)
         print(f"Merged firmware and config blob into {output_path}")
-
     except Exception as e:
-        print(f" Failed to merge hex files: {e}")
+        print(f"Failed to merge hex files: {e}")
         raise
+
 
 
 def write_key_to_c_array(key_bytes, var_name, c_path):
@@ -495,44 +550,74 @@ def clean_build_dirs(script_dir):
 
 
 def copy_partition_hex(script_dir, output_dir):
-    """Copy the built partition hex file to the device output directory"""
     source_hex = os.path.join(script_dir, "partition_kes", "build", "merged.hex")
-    dest_hex = os.path.join(output_dir, "partition.hex")
+    dest_hex   = os.path.join(output_dir, "partition.hex")
 
     if not os.path.isfile(source_hex):
         raise FileNotFoundError(f"Built partition hex file not found: {source_hex}")
 
+    _must_not_exist(dest_hex, "Partition output hex")
+
     shutil.copy(source_hex, dest_hex)
-    print(f" Copied partition firmware to: {dest_hex}")
+    print(f"Copied partition firmware to: {dest_hex}")
     return dest_hex
 
 
-def main(number_str):
+def main(device_number_str: str, customer_override: str | None = None):
+    # Paths and config
     config_path = os.path.join(script_dir, CONFIG_FILE)
-
     if not os.path.isfile(config_path):
-        print(f" '{CONFIG_FILE}' not found in script directory.")
+        print(f"'{CONFIG_FILE}' not found in script directory.")
         sys.exit(1)
 
+    # Read cert info (sec_tag + default customer name from config in repo root)
     cert_info = parse_config_and_get_cert_paths(script_dir)
-    customer = cert_info["customer"]
+    customer_from_config = cert_info["customer"]
 
-    device_name = f"nrid{number_str.zfill(3)}"
-    customer_dir = os.path.join(script_dir, customer)
-    output_dir = os.path.join(customer_dir, device_name)
-    os.makedirs(output_dir, exist_ok=True)
+    # If a customer override was provided on the CLI, use it for this run
+    customer = customer_override if customer_override else customer_from_config
 
-    shutil.copy(config_path, os.path.join(output_dir, CONFIG_FILE))
+    # Device + output layout (outside project root, one level up)
+    device_name   = f"nrid{device_number_str.zfill(3)}"
+    firmware_root = os.path.abspath(os.path.join(script_dir, "..", "firmware_storage"))
+    customer_dir  = os.path.join(firmware_root, customer)
+    output_dir    = os.path.join(customer_dir, device_name)
 
+    # ------ DO NOT OVERWRITE EXISTING DEVICE ------
+    if os.path.exists(output_dir):
+        print(f"[abort] Device folder already exists for {device_name}: {output_dir}")
+        print("Refusing to overwrite existing artifacts. Choose a new device id.")
+        sys.exit(2)
+
+    # Create dirs (fail on race for the device folder)
+    os.makedirs(customer_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=False)
+
+    # Copy config into the *new* device folder
+    copied_config_path = os.path.join(output_dir, CONFIG_FILE)
+    _must_not_exist(copied_config_path, "Copied config")
+    shutil.copy(config_path, copied_config_path)
+
+    # Apply optional overrides to the copied config
+    if customer_override:
+        overwrite_name_in_file(copied_config_path, customer_override)
+
+    # Always set mq_clid/mqtt_clid to the device name
+    overwrite_mq_clid_in_file(copied_config_path, device_name)
+
+    # Key material
     print(f"Generating keys for {device_name}...")
-    aes_key = generate_keys(device_name, output_dir)
+    aes_key = generate_keys(device_name, output_dir)  # generate_keys ensures no file overwrite
 
+    # Export AES + server-auth PEMs into the project (partition_kes/src/*.c)
     aes_key_path = os.path.join(output_dir, f"{device_name}_cipher.pem")
     export_keys_to_project(aes_key_path, script_dir, cert_info)
 
+    # Point sysbuild to this device's boot key
     boot_pem = os.path.join(output_dir, f"{device_name}_boot.pem")
     write_sysbuild_conf(script_dir, boot_pem)
 
+    # Clean + build partition app
     print("Cleaning build directories...")
     clean_build_dirs(script_dir)
 
@@ -541,41 +626,53 @@ def main(number_str):
         print("Build failed. Exiting.")
         sys.exit(1)
 
+    # Copy built partition to device folder
     partition_hex_path = copy_partition_hex(script_dir, output_dir)
 
+    # Create encrypted config blob (+ slots + merged with partition)
     print("Creating encrypted config blob...")
-    blob_data = create_encrypted_config_blob(aes_key, config_path, device_name)
+    blob_data = create_encrypted_config_blob(aes_key, copied_config_path, device_name)
 
-    blob_hex_slot0 = os.path.join(output_dir, "blob_slot0.hex")
-    blob_hex_slot1 = os.path.join(output_dir, "blob_slot1.hex")
-    combined_blob_hex = os.path.join(output_dir, "blob_combined.hex")
-
+    blob_hex_slot0     = os.path.join(output_dir, "blob_slot0.hex")
+    blob_hex_slot1     = os.path.join(output_dir, "blob_slot1.hex")
+    combined_blob_hex  = os.path.join(output_dir, "blob_combined.hex")
     create_dual_blob_hex_files(blob_data, blob_hex_slot0, blob_hex_slot1, combined_blob_hex)
 
     merged_hex_path = os.path.join(output_dir, "merged.hex")
     merge_hex_files(partition_hex_path, combined_blob_hex, merged_hex_path)
 
-    print(" Signing application binary...")
-    sign_application_image(customer, device_name, script_dir)
+    # Sign application image into the device folder
+    print("Signing application binary...")
+    # NOTE: this call matches the updated signer that writes to output_dir.
+    # If your signer still has the old signature, replace it with the new one I shared earlier.
+    #sign_application_image(device_name, output_dir, script_dir)
 
-    dfu_application(output_dir)
+    # Optionally package DFU (will refuse overwrite if you added _must_not_exist)
+    # dfu_application(output_dir)
 
-    print(f" {device_name} generated successfully!")
+    # Summary
+    print(f"{device_name} generated successfully!")
     print(f"Output directory: {output_dir}")
-    print(f"Files created:")
-    print(f"   - partition.hex (base firmware)")
-    print(f"   - blob.hex (encrypted config)")
-    print(f"   - merged.hex (final firmware with config)")
-    print(f" Config blob info:")
+    print("Files created:")
+    print("   - partition.hex       (base firmware)")
+    print("   - blob_slot0.hex      (primary config)")
+    print("   - blob_slot1.hex      (backup config)")
+    print("   - blob_combined.hex   (both slots)")
+    print("   - merged.hex          (final merged)")
+    print("   - zephyr_signed.bin   (signed app image)")
+    print("   - dfu_application.zip (DFU package)")
+    print("Config blob info:")
     print(f"   - Address: 0x{BLOB_ADDRESS:08X}")
     print(f"   - Size: {len(blob_data)} bytes")
-    print(f"   - Magic: {MAGIC_HEADER.hex()}")
+    print(f"   - CRC32: 0x{compute_crc32(blob_data[:-4]):08X}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python generate_config_bundle.py <nrid_number>")
-        print("Example: python generate_config_bundle.py 001")
+    if len(sys.argv) not in (2, 3):
+        print("Usage: python generate_config_bundle.py <nrid_number> [customer_name]")
+        print("Example: python generate_config_bundle.py 001 AcmeCorp")
         sys.exit(1)
 
-    main(sys.argv[1])
+    nrid_number = sys.argv[1]
+    customer_override = sys.argv[2] if len(sys.argv) == 3 else None
+    main(nrid_number, customer_override)

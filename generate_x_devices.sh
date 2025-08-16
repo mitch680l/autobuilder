@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "Usage: $0 <start> <stop>    # e.g. $0 0 49"
+# Usage:
+#   ./generate_x_devices.sh <start> <stop> [customer_name]
+# Examples:
+#   ./generate_x_devices.sh 0 49
+#   ./generate_x_devices.sh 0 49 AcmeCorp
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "Usage: $0 <start> <stop> [customer_name]    # e.g. $0 0 49 [AcmeCorp]"
   exit 1
 fi
 
 START="$1"
 STOP="$2"
+CUSTOMER_NAME="${3-}"     # optional
 
 # repo root (where this script and combined.py live)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,10 +41,19 @@ if (( START > STOP )); then
   exit 4
 fi
 
+if [[ -n "$CUSTOMER_NAME" ]]; then
+  echo "Customer override: $CUSTOMER_NAME"
+fi
+
 for i in $(seq "$START" "$STOP"); do
   ID=$(printf "%03d" "$i")
   echo "==> Building nrid${ID}"
-  python "$COMBINED" "$ID"
+  if [[ -n "$CUSTOMER_NAME" ]]; then
+    python "$COMBINED" "$ID" "$CUSTOMER_NAME"
+  else
+    python "$COMBINED" "$ID"
+  fi
 done
 
 echo "All done: ${START}..${STOP}"
+

@@ -1,36 +1,53 @@
-name,bob
+name,rev1_test
 sec_tag,42
-mqtt_broker_host,18.234.99.151
-fota_host,18.234.99.151
-user,admin
-pass,Kalscott123
-gps_target_rate,25
-interval_mqtt,40
-firmware_filename,blink_2.signed.bin
 pw,Kalscott123
-topic_gps,gnss_json
-topic_sensor,sensor_json
-topic_lte,lte_json
-enable_iridium,false
-test,Please enjoy this exactly sixty-four-character sentence today!!!
-test2,Please enjoy this exactly sixty-four-character sentence today!!!
-test3,Please enjoy this exactly sixty-four-character sentence today!!!
-test4,Please enjoy this exactly sixty-four-character sentence today!!!
-test5,Please enjoy this exactly sixty-four-character sentence today!!!
-test6,Please enjoy this exactly sixty-four-character sentence today!!!
-test7,Please enjoy this exactly sixty-four-character sentence today!!!
-test8,Please enjoy this exactly sixty-four-character sentence today!!!
-test9,Please enjoy this exactly sixty-four-character sentence today!!!
-test10,Please enjoy this exactly sixty-four-character sentence today!!!
-test11,Please enjoy this exactly sixty-four-character sentence today!!!
-test12,Please enjoy this exactly sixty-four-character sentence today!!!
-test13,Please enjoy this exactly sixty-four-character sentence today!!!
-test14,Please enjoy this exactly sixty-four-character sentence today!!!
-test15,Please enjoy this exactly sixty-four-character sentence today!!!
-test16,Please enjoy this exactly sixty-four-character sentence today!!!
-test17,Please enjoy this exactly sixty-four-character sentence today!!!
-test18,Please enjoy this exactly sixty-four-character sentence today!!!
-test19,Please enjoy this exactly sixty-four-character sentence today!!!
-test20,Please enjoy this exactly sixty-four-character sentence today!!!
-
-
+sys_en,0x0FFF
+reserved_enable1,0
+reserved_enable2,0
+hw_info,Kestrel_REV_1,Pre-release
+pwr_st,0
+reserved_hardware_info,0
+mdm_info,0
+mdm_imei,0
+sim_info,0
+lte_bnd,0x0000
+reserved_modem_info,0
+gnss_rt,25
+gnss_ver,u-blox8
+gnss_con,0x0000
+gnss_acc,0
+reserved_gnss_config1,0
+reserved_gnss_config2,0
+msg_fmt,JSON
+gps_fmt,UBLOX
+units,METRIC
+sens_rt,10
+sens_flt,5
+sens_cal,0
+reserved_sensor_config1,0
+reserved_sensor_config2,0
+mq_rt,40
+mq_addr,18.234.99.151
+mq_port,8883
+mq_clid,nrid8883
+mq_user,admin
+mq_pass,Kalscott123
+mq_tls,1
+mq_qos,0
+reserved_mqtt_config1,0
+reserved_mqtt_config2,0
+ota_int,86400
+ota_addr,18.234.99.151
+ota_port,80
+ota_user,0
+ota_pass,0
+ota_tls,0
+ota_cert,0
+reserved_ota_config1,0
+reserved_ota_config2,0
+uas_num,0
+cust_desc,0
+uas_status,0
+cust_f2,0
+cust_f3,0
+cust_f4,0
