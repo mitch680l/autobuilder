@@ -223,7 +223,7 @@ def build_partition_kes(source_dir):
     build_dir = os.path.join(source_dir, "build")
 
     build_cmd = (
-        f"west build --build-dir {build_dir} {source_dir} --pristine "
+        f"west build --build-dir {build_dir} {source_dir} -t merged_hex "
         f"--board kestrel/nrf9151/ns -- -DBOARD_ROOT={source_dir}"
     )
 
@@ -618,8 +618,8 @@ def main(device_number_str: str, customer_override: str | None = None):
     write_sysbuild_conf(script_dir, boot_pem)
 
     # Clean + build partition app
-    print("Cleaning build directories...")
-    clean_build_dirs(script_dir)
+    # print("Cleaning build directories...")
+    # clean_build_dirs(script_dir)
 
     print("Building partition_kes...")
     if not build_partition_kes(source_dir_1):
